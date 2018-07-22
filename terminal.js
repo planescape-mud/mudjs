@@ -1,127 +1,36 @@
 
-var echo = function() {};
+// for easy scripting in triggers
+function echo(txt) {
+    $('#terminal').trigger('output', [txt]);
+}
 
-$(document).ready(function() {
-    var terminal = $('#terminal');
-    var input = $('#input input');
-    var txt = '';
-    var x = 0;
-    var ansi = '';
+window.indexedDB = window.indexedDB || window.mozIndexedDB || window.webkitIndexedDB || window.msIndexedDB;
+window.IDBTransaction = window.IDBTransaction || window.webkitIDBTransaction || window.msIDBTransaction || {READ_WRITE: "readwrite"};
+window.IDBKeyRange = window.IDBKeyRange || window.webkitIDBKeyRange || window.msIDBKeyRange;
 
-    var bold = false, fg = 7, bg = 0;
-    var desired_class = 'fg-ansi-dark-color-7';
-    var actual_class;
+var lastChunkId = -1;
 
-    function process_ansi(start, params, cmd) {
-        if(start != '[') {
-            return;
-        }
+var database = new Promise(function(accept, reject) {
+    var request = window.indexedDB.open('dreamland', 1);
 
-        switch(cmd) {
-            case 'm':
-                for(i in params) {
-                    if(params[i] == '0') {
-                        bold = false;
-                    }
-                    if(params[i] == '1') {
-                        bold = true;
-                    }
-                    if(params[i] >= 40 && params[i] <= 49) {
-                        bg = params[i] - 40;
-                        console.log('background ignored: ' + bg);
-                    }
-                    if(params[i] >= 30 && params[i] <= 39) {
-                        fg = params[i] - 30;
-                    }
-                    if(bold) {
-                        desired_class = 'fg-ansi-bold fg-ansi-bright-color-' + fg;
-                    } else {
-                        desired_class = 'fg-ansi-dark-color-' + fg;
-                    }
-                }
-                break;
-            case 'J':
-                txt = '';
-                //terminal.empty();
-                break;
-            case 'H':
-                console.log('move cursor');
-                break;
-            default:
-                console.log('wtf: ' + cmd + ', ' + params);
-        }
-    }
+    request.onupgradeneeded = function(e) { 
+        var db = request.result;
+        console.log('upgrade');
 
-    echo = function(b) {
-        actual_class = '';
-        txt = '';
-        function addText(t) {
-            if(desired_class != actual_class) {
-                if(txt) {
-                    txt += '</span>';
-                }
-                txt += '<span class="' + desired_class + '">';
-                actual_class = desired_class;
-            }
-            txt += t;
-        }
-        for(i in b) {
-            if(ansi) {
-                ansi += b[i];
-                var m = ansi.match('.(.)([0-9;]*)([A-Za-z])');
-                if(m) {
-                    ansi='';
-                    process_ansi(m[1], m[2].split(';'), m[3]);
-                }
-            } else {
-                var c = b.charCodeAt(i);
-
-                switch(c) {
-                    case 0xa:
-                        addText('\n');
-                        x = 0;
-                        break;
-                    case 0x9:
-                        while((++x % 8) != 0)
-                            addText(' ');
-                        break;
-                    case 0x1b:
-                        ansi += b[i];
-                        break;
-                    case 0x3c: // <
-                        addText('&lt;');
-                        x++;
-                        break;
-                    case 0x3e: // >
-                        addText('&gt;');
-                        x++;
-                        break;
-                    default:
-                        if(c >= 0x20) {
-                            addText(b[i]);
-                            x++;
-                        }
-                }
-            }
-        }
-        if(txt) {
-            txt += '</span>';
-            var atBottom = $('#terminal-wrap').scrollTop() > ($('#terminal').height() - $('#terminal-wrap').height() - 50);
-            var lines = $(txt).appendTo(terminal).text().replace(/\xa0/g, ' ').split('\n');
-            $(lines).each(function() {
-                $('.trigger').trigger('text', [''+this]);
-            });
-
-            // only autoscroll if near the bottom of the page
-            if(atBottom) {
-                $('#terminal-wrap').scrollTop($('#terminal').height());
-            }
-        }
+        db.createObjectStore('terminal', { autoIncrement: true, keyPath: null });
     };
-    terminal.on('output', function process(e, b) {
-        echo(b);
-    });
 
+    request.onerror = function(e) {
+        console.log('error');
+    };
+
+    request.onsuccess = function(e) {
+        accept(request.result);
+    };
+});
+
+$.fn.terminal = function() {
+    var terminal = this;
     /*
      * Handlers for plus-minus buttons to change terminal font size.
      */ 
@@ -143,16 +52,240 @@ $(document).ready(function() {
         changeFontSize(-fontDelta);
     });
 
-    /*
-     * Handlers for 'keypad' key area.
-     */
-    $('.btn-keypad').click(function(e) {
+    $('#download-button').click(function(e) {
         e.preventDefault();
-        var btn = $(e.currentTarget), cmd = btn.data('cmd');
 
-        if (cmd !== '') {
-            console.log('cmd', cmd);
-            send(cmd);
+        database
+            .then(function(db) {
+                return new Promise(function(accept) {
+                    var blobOpts = { type: 'text/html' };
+                    var buf = ''; // TODO: this should be an incrementally created blob instead of a string
+                    var ds = db.transaction(['terminal']).objectStore('terminal');
+
+                    ds.openCursor(null, 'prev').onsuccess = function(e) {
+                        var next = e.target.result;
+                        if(next) {
+                            buf = next.value + buf;
+                            next.continue();
+                            return;
+                        }
+
+                        var blob = new Blob([buf], blobOpts);
+                        accept(URL.createObjectURL(blob));
+                    };
+                });
+            })
+            .then(function(url) {
+                console.log(url);
+                var link = $('<a>')
+                    .attr({
+                        href: url,
+                        download: 'mudjs.log'
+                    })
+                    [0];
+
+                    //.appendTo($('body'))
+                    //.text('click me')
+                    //.trigger('click')
+                   // [0].click();
+                        //var link = document.createElement('a');
+                          //  link.setAttribute('href',url);
+                            //    link.setAttribute('download', 'mudjs.log.html');
+                    setTimeout(function() {
+                        var event = document.createEvent('MouseEvents');
+                            event.initMouseEvent('click', true, true, window, 1, 0, 0, 0, 0, false, false, false, false, 0, null);
+                            link.dispatchEvent(event);
+                    }, 1000);
+                    //.remove();
+
+                //URL.revokeObjectURL(url);
+            });
+        
+    });
+
+    this.on('output', function(e, txt) {
+        var html = ansi2html(txt);
+
+        database
+            .then(function(db) {
+                return new Promise(function(accept) {
+                    db.transaction(['terminal'], 'readwrite').objectStore('terminal')
+                        .add(html)
+                        .onsuccess = function(e) {
+                            accept(e.target.result)
+                        };
+                });
+            })
+            .then(function(id) {
+                var $chunk = $('<span>')
+                    .append(html)
+                    .attr('data-chunk-id', id);
+                
+                // only append the new chunk if we had the latest
+                var $lst = terminal.find('span[data-chunk-id]:last-child');
+
+                if($lst.length === 0 || parseInt($lst.attr('data-chunk-id')) === lastChunkId) {
+                    terminal.trigger('append', [$chunk]);
+
+                    if(terminal.children().length > 100)
+                        terminal.children(':first').remove();
+                }
+
+                lastChunkId = id;
+
+                var lines = $chunk.text().replace(/\xa0/g, ' ').split('\n');
+                $(lines).each(function() {
+                    $('.trigger').trigger('text', [''+this]);
+                });
+            });
+    });
+
+    this.on('append', function(e, $txt) {
+        var atBottom = $('#terminal-wrap').scrollTop() > (terminal.height() - $('#terminal-wrap').height() - 50);
+        $txt.appendTo(terminal);
+
+        // only autoscroll if near the bottom of the page
+        if(atBottom) {
+            $('#terminal-wrap').scrollTop(terminal.height());
         }
     });
-});
+
+    return this;
+};
+
+function terminalInit() {
+    var terminal = $('#terminal').terminal();
+
+    return database
+        .then(function(db) {
+            return new Promise(function(accept) {
+                var loaded=0;
+                var ds = db.transaction(['terminal']).objectStore('terminal');
+                
+                ds.openCursor(null, 'prev').onsuccess = function(e) {
+                    var next = e.target.result;
+                    if(next) {
+                        var $chunk = $('<span>')
+                            .append(next.value)
+                            .attr('data-chunk-id', next.key);
+
+                        terminal.prepend($chunk);
+
+                        loaded += next.value.length;
+
+                        if(loaded < 5000) {
+                            next.continue();
+                            return;
+                        }
+                    }
+
+                    accept();
+                };
+            });
+        })
+        .then(function() {
+            var scrolling = false;
+
+            function append(html) {
+                terminal.trigger('append', [$(html)]);
+            }
+
+            append('<hr>');
+            append(ansi2html('\u001b[1;31m#################### HISTORY LOADED ####################\n'));
+            append('<hr>');
+
+            $('#terminal-wrap')
+                .scrollTop(terminal.height()) // scroll to the bottom
+                .on('scroll', function(e) {
+                    if(scrolling) {
+                        e.preventDefault(); // XXX is it required?
+                        return;
+                    }
+
+                    if($('#terminal-wrap').scrollTop() < 1000) {
+                        var $fst = terminal.find('span[data-chunk-id]:first-child');
+
+                        if($fst.length > 0) {
+                            var off = $fst.offset().top;
+                            var fstId = parseInt($fst.attr('data-chunk-id'));
+                            var range = IDBKeyRange.upperBound(fstId, true); // exclusive
+
+                            scrolling = true;
+                            
+                            database
+                                .then(function(db) {
+                                    var loaded=0;
+                                    var ds = db.transaction(['terminal']).objectStore('terminal');
+                                    ds.openCursor(range, 'prev').onsuccess = function(e) {
+                                        var next = e.target.result;
+                                        if(next) {
+                                            var $chunk = $('<span>')
+                                                .append(next.value)
+                                                .attr('data-chunk-id', next.key);
+
+                                            terminal.prepend($chunk);
+                                            if($('#terminal').children().length > 100) {
+                                                $('#terminal').children(':last').remove();
+                                            }
+                                            $('#terminal-wrap').scrollTop($('#terminal-wrap').scrollTop() + $fst.offset().top - off);
+
+                                            loaded += next.value.length;
+
+                                            if(loaded < 5000) {
+                                                next.continue();
+                                                return;
+                                            }
+                                        }
+
+                                        scrolling = false;
+                                    };
+                                });
+                        }
+                    }
+
+                    if($('#terminal-wrap').scrollTop() > (terminal.height() - $('#terminal-wrap').height() - 1000)) {
+                        var $lst = terminal.find('span[data-chunk-id]:last-child');
+
+                        if($lst.length > 0) {
+                            var off = $lst.offset().top;
+                            var lstId = parseInt($lst.attr('data-chunk-id'));
+                            if(lstId === lastChunkId)
+                                return;
+                            var range = IDBKeyRange.lowerBound(lstId, true); // exclusive
+
+                            scrolling = true;
+                            
+                            database
+                                .then(function(db) {
+                                    var loaded=0;
+                                    var ds = db.transaction(['terminal']).objectStore('terminal');
+                                    ds.openCursor(range, 'next').onsuccess = function(e) {
+                                        var next = e.target.result;
+                                        if(next) {
+                                            var $chunk = $('<span>')
+                                                .append(next.value)
+                                                .attr('data-chunk-id', next.key);
+
+                                            terminal.append($chunk);
+                                            if($('#terminal').children().length > 100) {
+                                                $('#terminal').children(':first').remove();
+                                            }
+                                            $('#terminal-wrap').scrollTop($('#terminal-wrap').scrollTop() + $lst.offset().top - off);
+
+                                            loaded += next.value.length;
+
+                                            if(loaded < 5000) {
+                                                next.continue();
+                                                return;
+                                            }
+                                        }
+
+                                        scrolling = false;
+                                    };
+                                });
+                        }
+                    }
+                });
+
+        });
+}

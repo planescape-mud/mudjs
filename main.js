@@ -47,6 +47,19 @@ $(document).ready(function() {
         // do not prevent default
     });
 
+    /*
+     * Handlers for 'keypad' key area.
+     */
+    $('.btn-keypad').click(function(e) {
+        e.preventDefault();
+        var btn = $(e.currentTarget), cmd = btn.data('cmd');
+
+        if (cmd !== '') {
+            console.log('cmd', cmd);
+            send(cmd);
+        }
+    });
+
     function process(s) {
         $('#terminal').trigger('output', [s]);
 
@@ -149,8 +162,14 @@ $(document).ready(function() {
         $('#reconnect').hide();
         $('#input input').show();
     }
-
-    connect();
+ 
+    terminalInit()
+        .then(function() {
+            connect();
+        })
+        .catch(function(e) {
+            console.log(e);
+        });
 
     $('#reconnect').click(function(e) {
         e.preventDefault();
