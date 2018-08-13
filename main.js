@@ -18,7 +18,7 @@ $(document).ready(function() {
             process(b);
         }
         ws.onopen = function(e) {
-            send('7');
+            send('0');
         }
         ws.onclose = function(e) {
             process('\u001b[1;31m#################### DISCONNECTED ####################\n');
