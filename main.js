@@ -21,7 +21,7 @@ $(document).ready(function() {
             send('0');
         }
         ws.onclose = function(e) {
-            process('\u001b[1;31m#################### DISCONNECTED ####################\n');
+            process('\u001b[1;31m#################### DISCONNECTED ####################\u001b[0;37m\n');
             $('#reconnect').show();
             $('#input input').hide();
             ws = null;
